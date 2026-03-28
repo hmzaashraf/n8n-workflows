@@ -1,0 +1,467 @@
+{
+  "name": "Job Search Automation - Data Analyst",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 12
+            }
+          ]
+        }
+      },
+      "id": "1671e371-d9fc-4b37-b81f-a080c17e7695",
+      "name": "Run Every 12 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        2368,
+        1728
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "6de92eec-3540-4738-9006-9e60f5243b42",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        2368,
+        1936
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const jobTitles = [\n  'Data Analyst',\n  'People Analyst',\n  'BI Analyst',\n  'Tableau Specialist',\n  'Business Analyst',\n  'Financial Analyst'\n];\n\nconst queries = jobTitles.map(title => ({\n  json: {\n    jobTitle: title,\n    minSalary: 20000,\n    willingToRelocate: true\n  }\n}));\n\nreturn queries;"
+      },
+      "id": "cb00a21d-317d-4932-b731-65d57fde4255",
+      "name": "Build Search Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2624,
+        1840
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const apiKey = $env.SERPAPI_KEY;\nconst jobTitle = $json.jobTitle;\nconst maxPages = 3;\nlet allResults = [];\nlet nextPageToken = null;\n\nfor (let page = 0; page < maxPages; page++) {\n  let url = `https://serpapi.com/search.json?engine=google_jobs&q=${encodeURIComponent(jobTitle)}&api_key=${apiKey}&num=10&location=United+States`;\n  \n  if (nextPageToken) {\n    url += `&next_page_token=${encodeURIComponent(nextPageToken)}`;\n  }\n\n  const response = await this.helpers.httpRequest({\n    method: 'GET',\n    url: url,\n    json: true\n  });\n\n  if (response.jobs_results && response.jobs_results.length > 0) {\n    allResults = allResults.concat(response.jobs_results);\n  }\n\n  if (response.serpapi_pagination && response.serpapi_pagination.next_page_token) {\n    nextPageToken = response.serpapi_pagination.next_page_token;\n  } else {\n    break;\n  }\n}\n\nreturn [{ json: { jobs_results: allResults, _searchedTitle: jobTitle } }];"
+      },
+      "id": "d5535465-e9a8-48ea-a246-a57e14188635",
+      "name": "Search Google Jobs (SerpAPI)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        1728
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.adzuna.com/v1/api/jobs/us/search/1",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "app_id",
+              "value": "={{ $env.ADZUNA_APP_ID }}"
+            },
+            {
+              "name": "app_key",
+              "value": "={{ $env.ADZUNA_APP_KEY }}"
+            },
+            {
+              "name": "what",
+              "value": "={{ $json.jobTitle }}"
+            },
+            {
+              "name": "salary_min",
+              "value": "20000"
+            },
+            {
+              "name": "results_per_page",
+              "value": "20"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "8bfd4540-a7a5-422f-bf0a-c21d9865b9d8",
+      "name": "Search Adzuna Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2880,
+        1936
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://remotive.com/api/remote-jobs",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "search",
+              "value": "={{ $json.jobTitle }}"
+            },
+            {
+              "name": "limit",
+              "value": "20"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "2ac57dc9-b199-4c31-abb5-0031fbadf595",
+      "name": "Search Remotive (Remote Jobs)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2880,
+        2128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const allJobs = [];\nconst seen = new Set();\n\nfor (const item of $input.all()) {\n  const data = item.json;\n\n  // Parse Google Jobs (SerpAPI)\n  if (data.jobs_results && Array.isArray(data.jobs_results)) {\n    for (const job of data.jobs_results) {\n      const key = `${job.title}-${job.company_name}`.toLowerCase();\n      if (!seen.has(key)) {\n        seen.add(key);\n        allJobs.push({\n          json: {\n            Source: 'Google Jobs',\n            Title: job.title || '',\n            Company: job.company_name || '',\n            Location: job.location || '',\n            Salary: job.detected_extensions?.salary || 'Not Listed',\n            PostedDate: job.detected_extensions?.posted_at || '',\n            Description: (job.description || '').substring(0, 300),\n            ApplyLink: job.apply_options?.[0]?.link || job.share_link || '',\n            JobType: job.detected_extensions?.schedule_type || '',\n            SearchedTitle: data._searchedTitle || ''\n          }\n        });\n      }\n    }\n  }\n\n  // Parse Adzuna\n  if (data.results && Array.isArray(data.results)) {\n    for (const job of data.results) {\n      const key = `${job.title}-${job.company?.display_name}`.toLowerCase();\n      if (!seen.has(key)) {\n        seen.add(key);\n        allJobs.push({\n          json: {\n            Source: 'Adzuna',\n            Title: job.title || '',\n            Company: job.company?.display_name || '',\n            Location: job.location?.display_name || '',\n            Salary: job.salary_is_predicted === '1' ? `~$${Math.round(job.salary_min || 0)}–$${Math.round(job.salary_max || 0)}` : (job.salary_min ? `$${Math.round(job.salary_min)}–$${Math.round(job.salary_max)}` : 'Not Listed'),\n            PostedDate: job.created || '',\n            Description: (job.description || '').substring(0, 300),\n            ApplyLink: job.redirect_url || '',\n            JobType: job.contract_time || '',\n            SearchedTitle: data._searchedTitle || ''\n          }\n        });\n      }\n    }\n  }\n\n  // Parse Remotive\n  if (data.jobs && Array.isArray(data.jobs)) {\n    for (const job of data.jobs) {\n      const key = `${job.title}-${job.company_name}`.toLowerCase();\n      if (!seen.has(key)) {\n        seen.add(key);\n        allJobs.push({\n          json: {\n            Source: 'Remotive',\n            Title: job.title || '',\n            Company: job.company_name || '',\n            Location: job.candidate_required_location || 'Remote',\n            Salary: job.salary || 'Not Listed',\n            PostedDate: job.publication_date || '',\n            Description: (job.description || '').replace(/<[^>]*>/g, '').substring(0, 300),\n            ApplyLink: job.url || '',\n            JobType: job.job_type || '',\n            SearchedTitle: job.category || ''\n          }\n        });\n      }\n    }\n  }\n}\n\nif (allJobs.length === 0) {\n  return [{ json: { Source: 'None', Title: 'No jobs found', Company: '', Location: '', Salary: '', PostedDate: '', Description: '', ApplyLink: '', JobType: '', SearchedTitle: '' } }];\n}\n\nreturn allJobs;"
+      },
+      "id": "bdf55780-9b71-43ef-b0f5-edb2e7ba76c0",
+      "name": "Merge & Deduplicate Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3168,
+        1936
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const skills = [\n  'data analyst', 'people analyst', 'bi analyst', 'tableau',\n  'business analyst', 'financial analyst', 'sql', 'excel',\n  'power bi', 'python', 'dashboard', 'data visualization',\n  'eda', 'reporting', 'pivot table', 'vlookup', 'kpi',\n  'data cleaning', 'etl', 'google sheets', 'pandas'\n];\n\nconst results = [];\n\nfor (const item of $input.all()) {\n  const job = item.json;\n  const text = `${job.Title} ${job.Description} ${job.JobType}`.toLowerCase();\n\n  let matchCount = 0;\n  const matchedSkills = [];\n\n  for (const skill of skills) {\n    if (text.includes(skill)) {\n      matchCount++;\n      matchedSkills.push(skill);\n    }\n  }\n\n  // Keep jobs with at least 1 skill match\n  if (matchCount >= 1) {\n    results.push({\n      json: {\n        ...job,\n        SkillMatchCount: matchCount,\n        MatchedSkills: matchedSkills.join(', '),\n        RelevanceScore: Math.round((matchCount / skills.length) * 100) + '%'\n      }\n    });\n  }\n}\n\n// Sort by relevance (highest match count first)\nresults.sort((a, b) => b.json.SkillMatchCount - a.json.SkillMatchCount);\n\nif (results.length === 0) {\n  return [{ json: { Source: 'None', Title: 'No matching jobs found', Company: '', Location: '', Salary: '', PostedDate: '', Description: '', ApplyLink: '', JobType: '', SkillMatchCount: 0, MatchedSkills: '', RelevanceScore: '0%' } }];\n}\n\nreturn results;"
+      },
+      "id": "493f8daa-7583-4da9-8df9-1ba49cac726a",
+      "name": "Filter by Your Skills",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3424,
+        1936
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date().toISOString().split('T')[0];\nconst rows = [];\n\nfor (const item of $input.all()) {\n  const j = item.json;\n  rows.push({\n    json: {\n      DateFound: now,\n      Source: j.Source,\n      JobTitle: j.Title,\n      Company: j.Company,\n      Location: j.Location,\n      Salary: j.Salary,\n      PostedDate: j.PostedDate,\n      JobType: j.JobType,\n      RelevanceScore: j.RelevanceScore,\n      MatchedSkills: j.MatchedSkills,\n      ApplyLink: j.ApplyLink,\n      Description: j.Description,\n      Applied: 'No'\n    }\n  });\n}\n\nreturn rows;"
+      },
+      "id": "c3963918-9c51-4b76-bbbb-0e29c73b4091",
+      "name": "Format for Excel Sheet",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3680,
+        1936
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "url",
+          "value": ""
+        }
+      },
+      "id": "09c19a98-92be-479d-8cb9-1cf82e2df147",
+      "name": "Read Existing Jobs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3872,
+        1936
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get new jobs from Format node (input 0)\nconst newJobs = $input.all();\n\n// Get existing jobs from Read Existing Jobs node\nlet existingJobs = [];\ntry {\n  existingJobs = $('Read Existing Jobs').all();\n} catch (e) {\n  // Sheet is empty, no existing jobs\n  existingJobs = [];\n}\n\n// Build a Set of existing job keys (JobTitle + Company) for fast lookup\nconst existingKeys = new Set();\nfor (const existing of existingJobs) {\n  const title = (existing.json.JobTitle || '').toLowerCase().trim();\n  const company = (existing.json.Company || '').toLowerCase().trim();\n  if (title) {\n    existingKeys.add(`${title}|||${company}`);\n  }\n}\n\n// Filter out jobs that already exist in the sheet\nconst onlyNewJobs = [];\nfor (const job of newJobs) {\n  const title = (job.json.JobTitle || '').toLowerCase().trim();\n  const company = (job.json.Company || '').toLowerCase().trim();\n  const key = `${title}|||${company}`;\n\n  if (!existingKeys.has(key)) {\n    onlyNewJobs.push(job);\n  }\n}\n\nif (onlyNewJobs.length === 0) {\n  return [{ json: { _noNewJobs: true, message: 'No new jobs found. All jobs already exist in sheet.' } }];\n}\n\nreturn onlyNewJobs;"
+      },
+      "id": "f5acf067-4005-436a-978c-441e4b92866d",
+      "name": "Remove Duplicates (Compare with Sheet)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4080,
+        1936
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-has-new-jobs",
+              "leftValue": "={{ $json._noNewJobs }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "notTrue"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7d6182f6-5279-46b9-bd7e-a1cabd971b6f",
+      "name": "Has New Jobs?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4272,
+        1936
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "url",
+          "value": ""
+        }
+      },
+      "id": "b4d950ad-4c07-4b3b-9bb0-3096651d485b",
+      "name": "Append New Jobs to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4480,
+        1840
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const count = $input.all().length;\nreturn [{\n  json: {\n    summary: `Job search completed! Added ${count} NEW jobs to Google Sheets.`,\n    newJobCount: count,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "c7a5921f-99f1-4f2d-85b9-a5b8680e8be9",
+      "name": "Summary (New Jobs Added)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4672,
+        1840
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    summary: 'Job search completed. No new jobs found — all results already exist in your sheet.',\n    newJobCount: 0,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "57cb5533-c08b-42af-8236-3ad879e4e4cf",
+      "name": "Summary (No New Jobs)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4480,
+        2080
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Run Every 12 Hours": {
+      "main": [
+        [
+          {
+            "node": "Build Search Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Search Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Search Queries": {
+      "main": [
+        [
+          {
+            "node": "Search Google Jobs (SerpAPI)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Search Adzuna Jobs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Search Remotive (Remote Jobs)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Google Jobs (SerpAPI)": {
+      "main": [
+        [
+          {
+            "node": "Merge & Deduplicate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Adzuna Jobs": {
+      "main": [
+        [
+          {
+            "node": "Merge & Deduplicate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Remotive (Remote Jobs)": {
+      "main": [
+        [
+          {
+            "node": "Merge & Deduplicate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge & Deduplicate Results": {
+      "main": [
+        [
+          {
+            "node": "Filter by Your Skills",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter by Your Skills": {
+      "main": [
+        [
+          {
+            "node": "Format for Excel Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format for Excel Sheet": {
+      "main": [
+        [
+          {
+            "node": "Read Existing Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Existing Jobs": {
+      "main": [
+        [
+          {
+            "node": "Remove Duplicates (Compare with Sheet)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove Duplicates (Compare with Sheet)": {
+      "main": [
+        [
+          {
+            "node": "Has New Jobs?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has New Jobs?": {
+      "main": [
+        [
+          {
+            "node": "Append New Jobs to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Summary (No New Jobs)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append New Jobs to Sheet": {
+      "main": [
+        [
+          {
+            "node": "Summary (New Jobs Added)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "808a1bc3-73fd-41cc-8166-a2c6f8fa1920",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "dfce69097f5e194f0a2e4483dc2740d8adc5a2a55f67cfc0a658d80c3cb950d5"
+  },
+  "id": "jSxxoH8TT4WBNRDV",
+  "tags": []
+}
