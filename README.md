@@ -7,7 +7,7 @@ The workflows in this repository are designed to automate common business and pe
 # Workflows Included
 1. Job Search Assistant
 
-An automation workflow that helps manage and streamline the job application process.
+  An automation workflow that helps manage and streamline the job application process.
 Key capabilities include:
 
 - Tracking job applications
@@ -17,7 +17,7 @@ Key capabilities include:
 
 2. Social Media Agent
 
-A workflow designed to assist with social media automation.
+  A workflow designed to assist with social media automation.
 Features include:
 
 - Content scheduling and posting
