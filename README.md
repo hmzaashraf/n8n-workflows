@@ -21,3 +21,9 @@ Features include:
 - Content scheduling and posting
 - Workflow-based content management
 - Automation of repetitive social media tasks
+
+# Contributing
+Contributions are welcome. Feel free to submit issues or pull requests to improve workflows or add new automations.
+
+# License
+This project is open-source and available for use and modification.
